@@ -1,0 +1,21 @@
+{
+    "postprocess": [
+        "elm-watch-node",
+        "postprocess.js"
+    ],
+    "serve": "./public/",
+    "targets": {
+        "Frontend": {
+            "inputs": [
+                "src/Frontend.elm"
+            ],
+            "output": "./public/build/frontend.elm.js"
+        },
+        "Worker": {
+            "inputs": [
+                "src/Worker.elm"
+            ],
+            "output": "./public/build/worker.elm.js"
+        }
+    }
+}
