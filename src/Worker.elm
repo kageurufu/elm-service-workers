@@ -1,28 +1,26 @@
 module Worker exposing (main)
 
-import Interop.Request
-import Interop.Result
-import Json.Decode
-import Json.Encode
-import Platform
-import Time
-import Worker.Event exposing (ClientId)
+import Interop
+import Json.Decode as Decode
+import Rpc
+import Serialize as S
+import State.Shared exposing (SharedModel)
+import Worker.Ports as Ports
 
 
-type alias Model =
-    {}
+type alias WorkerModel =
+    { sharedModel : SharedModel
+    }
 
 
-type alias Flags =
-    Json.Decode.Value
-
-
-type Msg
-    = OnRequest ClientId Interop.Request.Request
-    | UpdateTime Time.Posix
+type WorkerMsg
+    = SharedMsg State.Shared.SharedMsg
+    | Rpc Ports.Client Rpc.RpcCommand
+    | NewClient Ports.Client
     | NoOp
 
 
+main : Program () WorkerModel WorkerMsg
 main =
     Platform.worker
         { init = init
@@ -31,64 +29,62 @@ main =
         }
 
 
-init : Flags -> ( Model, Cmd Msg )
-init flags =
-    ( {}, Cmd.none )
+init : () -> ( WorkerModel, Cmd WorkerMsg )
+init _ =
+    ( { sharedModel = State.Shared.init }
+    , Cmd.none
+    )
 
 
-subscriptions : Model -> Sub Msg
-subscriptions model =
-    Sub.batch
-        [ Worker.Event.onMessage
-            Interop.Request.requestDecoder
-            handleMessage
-        , Time.every 5000 UpdateTime
-        ]
-
-
-update : Msg -> Model -> ( Model, Cmd Msg )
+update : WorkerMsg -> WorkerModel -> ( WorkerModel, Cmd WorkerMsg )
 update msg model =
-    case msg of
+    case Debug.log "msg" msg of
+        SharedMsg sharedMsg ->
+            let
+                ( newSharedModel, sharedCmds ) =
+                    State.Shared.update sharedMsg model.sharedModel
+            in
+            ( { model | sharedModel = newSharedModel }
+            , Cmd.batch
+                [ Cmd.map SharedMsg sharedCmds
+                , Ports.sendToAll (Interop.SharedModel newSharedModel)
+                ]
+            )
+
+        Rpc client rpcCommand ->
+            let
+                result =
+                    Rpc.process rpcCommand
+            in
+            ( model
+            , Ports.send client (Interop.RpcResult result)
+            )
+
+        NewClient client ->
+            ( model
+            , Ports.send client (Interop.SharedModel model.sharedModel)
+            )
+
         NoOp ->
             ( model, Cmd.none )
 
-        UpdateTime posix ->
-            ( model
-            , Worker.Event.broadcast
-                (Interop.Result.encodeResult <|
-                    Interop.Result.Time posix
-                )
-            )
 
-        OnRequest clientId request ->
-            ( model
-            , Worker.Event.sendMessage
-                clientId
-                (Interop.Result.encodeResult <|
-                    processRequest request
-                )
-            )
+handleMessage : ( Ports.Client, Decode.Value ) -> WorkerMsg
+handleMessage ( client, value ) =
+    case S.decodeFromJson Interop.requestCodec value of
+        Ok (Interop.SharedMsg sharedMsg) ->
+            SharedMsg sharedMsg
+
+        Ok (Interop.RpcCommand rpcCommand) ->
+            Rpc client rpcCommand
+
+        Err _ ->
+            Debug.todo "branch 'Err _' not implemented"
 
 
-processRequest : Interop.Request.Request -> Interop.Result.InteropResult
-processRequest request =
-    case request of
-        Interop.Request.Add a b ->
-            Interop.Result.Add (a + b)
-
-        Interop.Request.Echo s ->
-            Interop.Result.Echo s
-
-
-handleMessage : Result Json.Decode.Error ( ClientId, Interop.Request.Request ) -> Msg
-handleMessage result =
-    case result of
-        Ok ( client, request ) ->
-            OnRequest client request
-
-        Err err ->
-            let
-                _ =
-                    Debug.log "error" (Json.Decode.errorToString err)
-            in
-            NoOp
+subscriptions : WorkerModel -> Sub WorkerMsg
+subscriptions _ =
+    Sub.batch
+        [ Ports.onMessage (always NoOp) handleMessage
+        , Ports.onConnect NewClient
+        ]

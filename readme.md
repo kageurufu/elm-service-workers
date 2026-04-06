@@ -3,12 +3,9 @@ Elm as a Worker
 
 This is a demo of running an Elm app on the Frontend *and* as a Worker, using a unified codebase and a RPC for processing requests in the worker.
 
-`Interop/` defines messages and encoding/decoding for the RPC
+The `SharedModel` and `SharedMsg` are serialized using [MartinSStewart/elm-serialize](https://package.elm-lang.org/packages/MartinSStewart/elm-serialize/latest/). When the SharedWorker is running, the Frontend serializes any SharedMsgs and passes them to the Worker. The Worker processes the messages, broadcasting changes to the SharedModel to all connected Frontends. When a new Frontend connects (a new tab is opened), the Worker sends the current `SharedModel` to ensure new tabs are synchronized from the beginning. I only implemented SharedWorker support in this newer version, but adding ServiceWorkers from here would be fairly trivial. LocalStorage for persistance would be fairly simple too, and could even be used to pass the initial state to the Frontend through the Flags.
 
-`Worker.elm` exports `main: Platform.worker` that runs as a Web Worker, Shared Worker, or Service Worker.
-
-`Frontend.elm` exports `main : Browser.document` as a simple demo application to make requests to the worker.
-
+The Rpc is implemented in the code, but not wired to anything to use it right now. It could be used for things like "Make an HTTP request and give just me the result".
 
 Worker Differences, and working around them
 ===========================================
